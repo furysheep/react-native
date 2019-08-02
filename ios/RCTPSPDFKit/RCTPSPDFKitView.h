@@ -26,6 +26,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) RCTBubblingEventBlock onCloseButtonPressed;
 @property (nonatomic, copy) RCTBubblingEventBlock onDocumentSaved;
 @property (nonatomic, copy) RCTBubblingEventBlock onDocumentSaveFailed;
+@property (nonatomic, copy) RCTBubblingEventBlock onDocumentLoadFailed;
 @property (nonatomic, copy) RCTBubblingEventBlock onAnnotationTapped;
 @property (nonatomic, copy) RCTBubblingEventBlock onAnnotationsChanged;
 @property (nonatomic, copy) RCTBubblingEventBlock onStateChanged;
@@ -35,14 +36,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)exitCurrentlyActiveMode;
 
 /// Document
-- (BOOL)saveCurrentDocument;
+- (BOOL)saveCurrentDocumentWithError:(NSError *_Nullable *)error;
 
 /// Anotations
-- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAnnotations:(PSPDFPageIndex)pageIndex type:(PSPDFAnnotationType)type;
-- (BOOL)addAnnotation:(id)jsonAnnotation;
+- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAnnotations:(PSPDFPageIndex)pageIndex type:(PSPDFAnnotationType)type error:(NSError *_Nullable *)error;
+- (BOOL)addAnnotation:(id)jsonAnnotation error:(NSError *_Nullable *)error;
 - (BOOL)removeAnnotationWithUUID:(NSString *)annotationUUID;
-- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAllUnsavedAnnotations;
-- (BOOL)addAnnotations:(NSString *)jsonAnnotations;
+- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAllUnsavedAnnotationsWithError:(NSError *_Nullable *)error;
+- (BOOL)addAnnotations:(NSString *)jsonAnnotations error:(NSError *_Nullable *)error;
 
 /// Forms
 - (NSDictionary<NSString *, NSString *> *)getFormFieldValue:(NSString *)fullyQualifiedName;

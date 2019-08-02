@@ -13,7 +13,7 @@
 #import "RCTConvert+PSPDFViewMode.h"
 #import "RCTConvert+UIBarButtonItem.h"
 
-#define VALIDATE_DOCUMENT(document, ...) { if (!document.isValid) { NSLog(@"Document is invalid."); return __VA_ARGS__; }}
+#define VALIDATE_DOCUMENT(document, ...) { if (!document.isValid) { NSLog(@"Document is invalid."); if (self.onDocumentLoadFailed) { self.onDocumentLoadFailed(@{@"error": @"Document is invalid."}); } return __VA_ARGS__; }}
 
 @interface RCTPSPDFKitView ()<PSPDFDocumentDelegate, PSPDFViewControllerDelegate, PSPDFFlexibleToolbarContainerDelegate>
 
@@ -29,12 +29,12 @@
     _pdfController.delegate = self;
     _pdfController.annotationToolbarController.delegate = self;
     _closeButton = [[UIBarButtonItem alloc] initWithImage:[PSPDFKit imageNamed:@"x"] style:UIBarButtonItemStylePlain target:self action:@selector(closeButtonPressed:)];
-
+    
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(annotationChangedNotification:) name:PSPDFAnnotationChangedNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(annotationChangedNotification:) name:PSPDFAnnotationsAddedNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(annotationChangedNotification:) name:PSPDFAnnotationsRemovedNotification object:nil];
   }
-
+  
   return self;
 }
 
@@ -48,27 +48,27 @@
   if (controller == nil || self.window == nil || self.topController != nil) {
     return;
   }
-
+  
   if (self.pdfController.configuration.useParentNavigationBar || self.hideNavigationBar) {
     self.topController = self.pdfController;
-
+    
   } else {
     self.topController = [[PSPDFNavigationController alloc] initWithRootViewController:self.pdfController];;
   }
-
+  
   UIView *topControllerView = self.topController.view;
   topControllerView.translatesAutoresizingMaskIntoConstraints = NO;
-
+  
   [self addSubview:topControllerView];
   [controller addChildViewController:self.topController];
   [self.topController didMoveToParentViewController:controller];
-
+  
   [NSLayoutConstraint activateConstraints:
    @[[topControllerView.topAnchor constraintEqualToAnchor:self.topAnchor],
      [topControllerView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
      [topControllerView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
      [topControllerView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-     ]];
+   ]];
 }
 
 - (void)destroyViewControllerRelationship {
@@ -81,7 +81,7 @@
 - (void)closeButtonPressed:(nullable id)sender {
   if (self.onCloseButtonPressed) {
     self.onCloseButtonPressed(@{});
-
+    
   } else {
     // try to be smart and pop if we are not displayed modally.
     BOOL shouldDismiss = YES;
@@ -119,8 +119,8 @@
   return [self.pdfController.annotationToolbarController hideToolbarAnimated:YES];
 }
 
-- (BOOL)saveCurrentDocument {
-  return [self.pdfController.document saveWithOptions:nil error:NULL];
+- (BOOL)saveCurrentDocumentWithError:(NSError *_Nullable *)error {
+  return [self.pdfController.document saveWithOptions:nil error:error];
 }
 
 #pragma mark - PSPDFDocumentDelegate
@@ -160,6 +160,10 @@
   [self onStateChangedForPDFViewController:pdfController pageView:pageView pageAtIndex:pageIndex];
 }
 
+- (void)pdfViewController:(PSPDFViewController *)pdfController didChangeDocument:(nullable PSPDFDocument *)document {
+  VALIDATE_DOCUMENT(document)
+}
+
 #pragma mark - PSPDFFlexibleToolbarContainerDelegate
 
 - (void)flexibleToolbarContainerDidShow:(PSPDFFlexibleToolbarContainer *)container {
@@ -176,21 +180,21 @@
 
 #pragma mark - Instant JSON
 
-- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAnnotations:(PSPDFPageIndex)pageIndex type:(PSPDFAnnotationType)type {
+- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAnnotations:(PSPDFPageIndex)pageIndex type:(PSPDFAnnotationType)type error:(NSError *_Nullable *)error {
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document, nil);
-
+  
   NSArray <PSPDFAnnotation *> *annotations = [document annotationsForPageAtIndex:pageIndex type:type];
-  NSArray <NSDictionary *> *annotationsJSON = [RCTConvert instantJSONFromAnnotations:annotations];
+  NSArray <NSDictionary *> *annotationsJSON = [RCTConvert instantJSONFromAnnotations:annotations error:error];
   return @{@"annotations" : annotationsJSON};
 }
 
-- (BOOL)addAnnotation:(id)jsonAnnotation {
+- (BOOL)addAnnotation:(id)jsonAnnotation error:(NSError *_Nullable *)error {
   NSData *data;
   if ([jsonAnnotation isKindOfClass:NSString.class]) {
     data = [jsonAnnotation dataUsingEncoding:NSUTF8StringEncoding];
   } else if ([jsonAnnotation isKindOfClass:NSDictionary.class])  {
-    data = [NSJSONSerialization dataWithJSONObject:jsonAnnotation options:0 error:nil];
+    data = [NSJSONSerialization dataWithJSONObject:jsonAnnotation options:0 error:error];
   } else {
     NSLog(@"Invalid JSON Annotation.");
     return NO;
@@ -199,17 +203,17 @@
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document, NO)
   PSPDFDocumentProvider *documentProvider = document.documentProviders.firstObject;
-
+  
   BOOL success = NO;
   if (data) {
-    PSPDFAnnotation *annotation = [PSPDFAnnotation annotationFromInstantJSON:data documentProvider:documentProvider error:NULL];
+    PSPDFAnnotation *annotation = [PSPDFAnnotation annotationFromInstantJSON:data documentProvider:documentProvider error:error];
     success = [document addAnnotations:@[annotation] options:nil];
   }
-
+  
   if (!success) {
     NSLog(@"Failed to add annotation.");
   }
-
+  
   return success;
 }
 
@@ -217,7 +221,7 @@
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document, NO)
   BOOL success = NO;
-
+  
   NSArray<PSPDFAnnotation *> *allAnnotations = [[document allAnnotationsOfType:PSPDFAnnotationTypeAll].allValues valueForKeyPath:@"@unionOfArrays.self"];
   for (PSPDFAnnotation *annotation in allAnnotations) {
     // Remove the annotation if the uuids match.
@@ -233,22 +237,22 @@
   return success;
 }
 
-- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAllUnsavedAnnotations {
+- (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)getAllUnsavedAnnotationsWithError:(NSError *_Nullable *)error {
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document, nil)
-
+  
   PSPDFDocumentProvider *documentProvider = document.documentProviders.firstObject;
-  NSData *data = [document generateInstantJSONFromDocumentProvider:documentProvider error:NULL];
-  NSDictionary *annotationsJSON = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:NULL];
+  NSData *data = [document generateInstantJSONFromDocumentProvider:documentProvider error:error];
+  NSDictionary *annotationsJSON = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:error];
   return annotationsJSON;
 }
 
-- (BOOL)addAnnotations:(id)jsonAnnotations {
+- (BOOL)addAnnotations:(id)jsonAnnotations error:(NSError *_Nullable *)error {
   NSData *data;
   if ([jsonAnnotations isKindOfClass:NSString.class]) {
     data = [jsonAnnotations dataUsingEncoding:NSUTF8StringEncoding];
   } else if ([jsonAnnotations isKindOfClass:NSDictionary.class])  {
-    data = [NSJSONSerialization dataWithJSONObject:jsonAnnotations options:0 error:nil];
+    data = [NSJSONSerialization dataWithJSONObject:jsonAnnotations options:0 error:error];
   } else {
     NSLog(@"Invalid JSON Annotations.");
     return NO;
@@ -258,11 +262,11 @@
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document, NO)
   PSPDFDocumentProvider *documentProvider = document.documentProviders.firstObject;
-  BOOL success = [document applyInstantJSONFromDataProvider:dataContainerProvider toDocumentProvider:documentProvider lenient:NO error:NULL];
+  BOOL success = [document applyInstantJSONFromDataProvider:dataContainerProvider toDocumentProvider:documentProvider lenient:NO error:error];
   if (!success) {
     NSLog(@"Failed to add annotations.");
   }
-
+  
   [self.pdfController reloadPageAtIndex:self.pdfController.pageIndex animated:NO];
   return success;
 }
@@ -274,7 +278,7 @@
     NSLog(@"Invalid fully qualified name.");
     return nil;
   }
-
+  
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document, nil)
   
@@ -284,7 +288,7 @@
       return @{@"value": formFieldValue ?: [NSNull new]};
     }
   }
-
+  
   return @{@"error": @"Failed to get the form field value."};
 }
 
@@ -293,7 +297,7 @@
     NSLog(@"Invalid fully qualified name.");
     return;
   }
-
+  
   PSPDFDocument *document = self.pdfController.document;
   VALIDATE_DOCUMENT(document)
   
@@ -334,7 +338,7 @@
     }
     return;
   }
-
+  
   NSString *name = notification.name;
   NSString *change;
   if ([name isEqualToString:PSPDFAnnotationChangedNotification]) {
@@ -344,8 +348,8 @@
   } else if ([name isEqualToString:PSPDFAnnotationsRemovedNotification]) {
     change = @"removed";
   }
-
-  NSArray <NSDictionary *> *annotationsJSON = [RCTConvert instantJSONFromAnnotations:annotations];
+  
+  NSArray <NSDictionary *> *annotationsJSON = [RCTConvert instantJSONFromAnnotations:annotations error:NULL];
   if (self.onAnnotationsChanged) {
     self.onAnnotationsChanged(@{@"change" : change, @"annotations" : annotationsJSON});
   }
@@ -361,7 +365,7 @@
       [leftItems addObject:barButtonItem];
     }
   }
-
+  
   if (viewMode.length) {
     [self.pdfController.navigationItem setLeftBarButtonItems:[leftItems copy] forViewMode:[RCTConvert PSPDFViewMode:viewMode] animated:animated];
   } else {
@@ -377,7 +381,7 @@
       [rightItems addObject:barButtonItem];
     }
   }
-
+  
   if (viewMode.length) {
     [self.pdfController.navigationItem setRightBarButtonItems:[rightItems copy] forViewMode:[RCTConvert PSPDFViewMode:viewMode] animated:animated];
   } else {
@@ -392,7 +396,7 @@
   } else {
     items = [self.pdfController.navigationItem leftBarButtonItems];
   }
-
+  
   return [self buttonItemsStringFromUIBarButtonItems:items];
 }
 
@@ -403,7 +407,7 @@
   } else {
     items = [self.pdfController.navigationItem rightBarButtonItems];
   }
-
+  
   return [self buttonItemsStringFromUIBarButtonItems:items];
 }
 
@@ -431,7 +435,7 @@
                           @"annotationEditingActive" : @(hasSelectedAnnotations),
                           @"textSelectionActive" : @(hasSelectedText),
                           @"formEditingActive" : @(isFormEditingActive)
-                          });
+    });
   }
 }
 
